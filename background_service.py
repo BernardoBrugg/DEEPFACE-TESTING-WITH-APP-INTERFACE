@@ -62,6 +62,15 @@ def main_page():
 
 def main(timeout=None):
     AppLogger.setup()
+    
+    import sys
+    if getattr(sys, 'frozen', False):
+        try:
+            import pyi_splash
+            pyi_splash.close()
+        except ImportError:
+            pass
+
     proc_thread = threading.Thread(target=face_processing_loop, daemon=True)
     proc_thread.start()
     
@@ -74,26 +83,27 @@ def main(timeout=None):
     app.on_startup(window_loop)
 
     if timeout:
-        import asyncio
-        
-        async def auto_shutdown():
-            await asyncio.sleep(timeout)
-            if alert_manager.local_state_fullscreen:
-                AppLogger.log(f"Timeout reached ({timeout}s) but ALERT IS ACTIVE. Extension granted. Retrying in 5s...", "warning")
-                await asyncio.sleep(5)
-                await auto_shutdown()
-                return
+        async def register_auto_shutdown():
+            async def auto_shutdown():
+                await asyncio.sleep(timeout)
+                if alert_manager.local_state_fullscreen:
+                    AppLogger.log(f"Timeout reached ({timeout}s) but ALERT IS ACTIVE. Extension granted. Retrying in 5s...", "warning")
+                    await asyncio.sleep(5)
+                    await auto_shutdown()
+                    return
 
-            AppLogger.log(f"Timeout reached ({timeout}s). FORCING EXIT", "info")
-            try:
-                app.shutdown()
-            except Exception as e:
-                AppLogger.log(f"Error during shutdown: {e}", "error")
-            await asyncio.sleep(0.5)
-            import os
-            os._exit(0)
-        
-        asyncio.create_task(auto_shutdown())
+                AppLogger.log(f"Timeout reached ({timeout}s). FORCING EXIT", "info")
+                try:
+                    app.shutdown()
+                except Exception as e:
+                    AppLogger.log(f"Error during shutdown: {e}", "error")
+                await asyncio.sleep(0.5)
+                import os
+                os._exit(0)
+            
+            asyncio.create_task(auto_shutdown())
+
+        app.on_startup(register_auto_shutdown)
 
     try:
         port = find_free_port()

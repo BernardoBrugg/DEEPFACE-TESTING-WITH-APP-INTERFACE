@@ -10,8 +10,6 @@ if getattr(sys, 'frozen', False):
     else:
         base_path = os.path.dirname(os.path.abspath(sys.executable))
     
-    # Deepface expects the home dir to contain .deepface folder
-    # We copied .deepface to the root of the dist folder
     os.environ['DEEPFACE_HOME'] = base_path
 else:
     base_path = os.path.dirname(os.path.abspath(__file__))
