@@ -5,7 +5,11 @@ import multiprocessing
 import os
 
 if getattr(sys, 'frozen', False):
-    base_path = sys._MEIPASS
+    if hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(sys.executable))
+    
     os.environ['DEEPFACE_HOME'] = base_path
 else:
     base_path = os.path.dirname(os.path.abspath(__file__))
@@ -56,17 +60,17 @@ def main():
     elif args.FaceRecognition:
         print("Starting Application (FaceRecognition)...")
         from main import run_app
-        run_app(start_mode='recognition')
+        run_app(start_mode='recognition', timeout=args.timeout)
         
     elif args.CheckAccess:
         print("Starting Application (CheckAccess)...")
         from main import run_app
-        run_app(start_mode='recognition', check_access=True, close_after=args.CloseAfter)
+        run_app(start_mode='recognition', check_access=True, close_after=args.CloseAfter, timeout=args.timeout)
         
     else:
         print("Starting Application (Default)...")
         from main import run_app
-        run_app(start_mode='default', check_access=args.CheckAccess, close_after=args.CloseAfter)
+        run_app(start_mode='default', check_access=args.CheckAccess, close_after=args.CloseAfter, timeout=args.timeout)
 
 if __name__ == '__main__':
     main()

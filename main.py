@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 from nicegui import ui, app
 import socket
 from src.common.logger import AppLogger
@@ -20,18 +21,30 @@ if getattr(sys, 'frozen', False):
 else:
     static_src_path = 'src'
 
+try:
+    from wsproto.connection import Connection
+    from wsproto.utilities import LocalProtocolError
+    
+    original_send = Connection.send
+
+    def patched_send(self, event):
+        try:
+            return original_send(self, event)
+        except LocalProtocolError:
+            pass
+    
+    Connection.send = patched_send
+except ImportError:
+    pass
+
 sys.path.append(".") 
 
 from src.common.theme import load_theme, loading_overlay
-from src.services.services import start_services, stop_services
-from src.pages.login.login import login_page
-from src.pages.dashboard.dashboard import dashboard_page
-from src.pages.setup.setup import setup_page
-from src.pages.landing.landing import landing_page
-from src.pages.settings.settings import settings_page
 
 def startup_wrapper():
+    from src.services.services import start_services
     start_services()
+    
     if getattr(sys, 'frozen', False):
         try:
             import pyi_splash
@@ -39,8 +52,34 @@ def startup_wrapper():
         except ImportError:
             pass
 
+    from src.common.state import state
+    if state.timeout:
+        print(f"App will close automatically in {state.timeout} seconds.")
+        import asyncio
+        
+        async def auto_shutdown():
+            await asyncio.sleep(state.timeout)
+            print(f"Timeout reached ({state.timeout}s). Closing application.")
+            sys.stdout.flush()
+            try:
+                app.shutdown()
+            except Exception as e:
+                print(f"Error during shutdown: {e}")
+            await asyncio.sleep(0.5)
+            os._exit(0)
+        
+        asyncio.create_task(auto_shutdown())
+
+def shutdown_wrapper():
+    print("Shutting down...")
+    try:
+        from src.services.services import stop_services
+        stop_services()
+    except Exception as e:
+        print(f"Error stopping services: {e}")
+
 app.on_startup(startup_wrapper)
-app.on_shutdown(stop_services)
+app.on_shutdown(shutdown_wrapper)
 
 load_theme()
 
@@ -88,33 +127,40 @@ def index_page():
     loading_overlay()
     
     if START_MODE == 'dashboard':
+        from src.pages.dashboard.dashboard import dashboard_page
         dashboard_page()
     elif START_MODE == 'recognition':
+        from src.pages.login.login import login_page
         login_page()
     else:
+        from src.pages.landing.landing import landing_page
         landing_page()
 
 @ui.page('/recognition')
 def recognition():
     if not ensure_security(): return
     loading_overlay()
+    from src.pages.login.login import login_page
     login_page()
 
 @ui.page('/settings')
 def settings():
     if not ensure_security(): return
     loading_overlay()
+    from src.pages.settings.settings import settings_page
     settings_page()
 
 @ui.page('/dashboard')
 def dashboard():
     if not ensure_security(): return
     loading_overlay()
+    from src.pages.dashboard.dashboard import dashboard_page
     dashboard_page()
 
 @ui.page('/setup')
 def setup():
     if not ensure_security(): return
+    from src.pages.setup.setup import setup_page
     setup_page()
 
 def find_free_port(start_port=8080, max_tries=100):
@@ -127,26 +173,41 @@ def find_free_port(start_port=8080, max_tries=100):
                 continue
     raise OSError("No free ports found")
 
-def run_app(start_mode='default', check_access=False, close_after=False):
+def run_app(start_mode='default', check_access=False, close_after=False, timeout=None):
     global START_MODE
     START_MODE = start_mode
     
     from src.common.state import state
     state.check_access = check_access
     state.close_after = close_after
+    state.timeout = timeout
 
     port = find_free_port()
     print(f"Starting UI on port {port} with mode {start_mode}")
+    
     favicon_path = os.path.join(static_src_path, 'public', 'icons', 'certi-icon.ico')
 
-    ui.run(title='DeepFace Access Control', 
-            favicon=favicon_path, 
-            port=port, 
-            reload=False, 
-            native=True, 
-            fullscreen=True, 
-            window_size=(1280, 800), 
-            storage_secret='deepface_secret')
+    class ShutdownFilter(logging.Filter):
+        def filter(self, record):
+            msg = str(record.msg)
+            if "CloseConnection" in msg or "ConnectionState.CLOSED" in msg:
+                return False
+            return True
+
+    logging.getLogger("uvicorn.error").addFilter(ShutdownFilter())
+    logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+
+    try:
+        ui.run(title='DeepFace Access Control', 
+                favicon=favicon_path, 
+                port=port, 
+                reload=False, 
+                native=True, 
+                fullscreen=True, 
+                window_size=(1280, 800), 
+                storage_secret='deepface_secret')
+    except Exception:
+        print("Application closed.")
 
 if __name__ in {"__main__", "__mp_main__"}:
     run_app()
